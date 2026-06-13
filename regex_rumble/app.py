@@ -1,4 +1,9 @@
-"""Textual App for the regex-rumble dojo (M2: shell only, no evaluation)."""
+"""Textual App for the regex-rumble dojo.
+
+M2: three-pane shell with focus management.
+M3: live regex evaluation — red/green dots next to each example, status bar
+with pass/fail tallies, graceful handling of invalid patterns.
+"""
 
 from __future__ import annotations
 
@@ -9,14 +14,33 @@ from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Static, TextArea
 
 from . import __version__
+from .engine import EvaluationResult, ExampleResult, evaluate
 
-EMPTY_PATTERN = "# Write your regex here.\n# (Live evaluation arrives in M3.)\n"
+EMPTY_PATTERN = ""
 EMPTY_ALLIES = "# One ally string per line — must MATCH.\n"
 EMPTY_ENEMIES = "# One enemy string per line — must NOT match.\n"
 
+PASS_DOT = "🟢"
+FAIL_DOT = "🔴"
+
+
+def _format_results(results: tuple[ExampleResult, ...], *, valid: bool) -> str:
+    if not results:
+        return "(no examples yet)"
+    lines: list[str] = []
+    for r in results:
+        if not valid:
+            dot = "·"
+        else:
+            dot = PASS_DOT if r.passed else FAIL_DOT
+        # Trim long lines so the side column stays readable.
+        text = r.text if len(r.text) <= 40 else r.text[:37] + "…"
+        lines.append(f"{dot} {text}")
+    return "\n".join(lines)
+
 
 class DojoPane(Vertical):
-    """A titled pane wrapping a TextArea editor."""
+    """A titled pane wrapping a TextArea editor, optionally with a results column."""
 
     DEFAULT_CSS = """
     DojoPane {
@@ -33,24 +57,51 @@ class DojoPane(Vertical):
         text-style: bold;
         padding: 0 0 1 0;
     }
-    DojoPane > TextArea {
+    DojoPane > .pane-body {
+        height: 1fr;
+    }
+    DojoPane TextArea {
         height: 1fr;
         border: none;
     }
+    DojoPane .results-col {
+        width: 24;
+        padding: 0 0 0 1;
+        color: $text-muted;
+    }
     """
 
-    def __init__(self, title: str, placeholder: str, pane_id: str) -> None:
+    def __init__(
+        self,
+        title: str,
+        placeholder: str,
+        pane_id: str,
+        *,
+        with_results: bool = False,
+    ) -> None:
         super().__init__(id=pane_id)
         self._title = title
         self._placeholder = placeholder
+        self._with_results = with_results
 
     def compose(self) -> ComposeResult:
         yield Static(self._title, classes="pane-title")
-        yield TextArea(self._placeholder, id=f"{self.id}-editor")
+        with Horizontal(classes="pane-body"):
+            yield TextArea(self._placeholder, id=f"{self.id}-editor")
+            if self._with_results:
+                yield Static("(no examples yet)", id=f"{self.id}-results", classes="results-col")
 
     def focus_editor(self) -> None:
         editor = self.query_one(TextArea)
         editor.focus()
+
+    def editor_text(self) -> str:
+        return self.query_one(TextArea).text
+
+    def set_results(self, text: str) -> None:
+        if not self._with_results:
+            return
+        self.query_one(f"#{self.id}-results", Static).update(text)
 
 
 class HelpScreen(ModalScreen):
@@ -95,7 +146,7 @@ class HelpScreen(ModalScreen):
 
 
 class RegexRumbleApp(App):
-    """Three-pane dojo shell. Evaluation logic lands in M3."""
+    """Three-pane dojo with live regex evaluation."""
 
     CSS = """
     Screen {
@@ -104,10 +155,21 @@ class RegexRumbleApp(App):
     #panes {
         height: 1fr;
     }
+    #status-bar {
+        dock: bottom;
+        height: 1;
+        padding: 0 1;
+        background: $boost;
+        color: $text;
+    }
+    #status-bar.-invalid {
+        background: $error;
+        color: $text;
+    }
     """
 
     TITLE = "regex-rumble"
-    SUB_TITLE = f"dojo shell · v{__version__}"
+    SUB_TITLE = f"dojo · v{__version__}"
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
@@ -125,14 +187,56 @@ class RegexRumbleApp(App):
         yield Header(show_clock=False)
         with Horizontal(id="panes"):
             yield DojoPane("⛩  Pattern", EMPTY_PATTERN, "pattern-pane")
-            yield DojoPane("🟢 Allies (must match)", EMPTY_ALLIES, "allies-pane")
-            yield DojoPane("🔴 Enemies (must NOT match)", EMPTY_ENEMIES, "enemies-pane")
+            yield DojoPane(
+                "🟢 Allies (must match)", EMPTY_ALLIES, "allies-pane", with_results=True
+            )
+            yield DojoPane(
+                "🔴 Enemies (must NOT match)", EMPTY_ENEMIES, "enemies-pane", with_results=True
+            )
+        yield Static("no examples yet — add allies and enemies", id="status-bar")
         yield Footer()
 
     def on_mount(self) -> None:
         self.action_focus_pane("pattern-pane")
+        self._refresh_evaluation()
 
-    # --- focus helpers ---
+    # --- evaluation -----------------------------------------------------
+
+    def _gather_text(self) -> tuple[str, str, str]:
+        return (
+            self.query_one("#pattern-pane", DojoPane).editor_text(),
+            self.query_one("#allies-pane", DojoPane).editor_text(),
+            self.query_one("#enemies-pane", DojoPane).editor_text(),
+        )
+
+    def _refresh_evaluation(self) -> EvaluationResult:
+        pattern, allies, enemies = self._gather_text()
+        # The pattern pane is a single-line concept; collapse to first non-empty
+        # non-comment line so users can leave hint text in the textarea later.
+        pattern_line = ""
+        for raw in pattern.splitlines():
+            stripped = raw.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            pattern_line = raw
+            break
+        result = evaluate(pattern_line, allies, enemies)
+        self.query_one("#allies-pane", DojoPane).set_results(
+            _format_results(result.allies, valid=result.valid)
+        )
+        self.query_one("#enemies-pane", DojoPane).set_results(
+            _format_results(result.enemies, valid=result.valid)
+        )
+        status = self.query_one("#status-bar", Static)
+        status.update(result.status_line())
+        status.set_class(not result.valid and bool(pattern_line), "-invalid")
+        return result
+
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:  # noqa: D401
+        """Re-evaluate on any keystroke in any pane."""
+        self._refresh_evaluation()
+
+    # --- focus helpers ---------------------------------------------------
 
     def _current_pane_index(self) -> int:
         focused = self.focused

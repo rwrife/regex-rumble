@@ -2,7 +2,7 @@
 
 > A terminal dojo for regex training. Write a pattern. The AI sensei tries to defeat it. Earn your belts.
 
-**Status:** pre-alpha (M1 scaffold). See [PLAN.md](./PLAN.md).
+**Status:** pre-alpha (M3 — live evaluation engine landed). See [PLAN.md](./PLAN.md).
 
 ## Install (planned)
 
@@ -14,22 +14,21 @@ uvx regex-rumble
 
 ## Quickstart
 
-Right now the CLI is a banner — the dojo is still being built. To try it locally:
-
 ```bash
 git clone https://github.com/rwrife/regex-rumble && cd regex-rumble
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
 regex-rumble --version
-regex-rumble            # prints the banner
+regex-rumble            # launches the three-pane dojo TUI
+regex-rumble --banner   # legacy banner output
 ```
 
-Once M3 lands:
+Type a regex in the **Pattern** pane and example strings in the **Allies**
+and **Enemies** panes. Each example is annotated live with 🟢 (pass) or
+🔴 (fail) and the status bar shows a running tally. Invalid regex is
+reported gracefully — no crashes.
 
-```bash
-export OPENAI_API_KEY=...
-regex-rumble
-```
+The AI sensei (`s` to summon) arrives in M4.
 
 ## Develop
 

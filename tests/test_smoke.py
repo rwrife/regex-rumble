@@ -22,6 +22,6 @@ def test_cli_version_flag() -> None:
 
 
 def test_cli_banner() -> None:
-    result = runner.invoke(app, [])
+    result = runner.invoke(app, ["--banner"])
     assert result.exit_code == 0
     assert "regex-rumble" in result.stdout

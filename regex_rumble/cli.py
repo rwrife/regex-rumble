@@ -33,13 +33,23 @@ def main(
     version: bool = typer.Option(
         False, "--version", "-V", help="Print version and exit.", is_eager=True
     ),
+    banner: bool = typer.Option(
+        False, "--banner", help="Print the banner and exit (skip the TUI)."
+    ),
 ) -> None:
     """Run the regex-rumble dojo (or show version)."""
     if version:
         typer.echo(f"regex-rumble {__version__}")
         raise typer.Exit()
-    if ctx.invoked_subcommand is None:
+    if ctx.invoked_subcommand is not None:
+        return
+    if banner:
         _print_banner()
+        raise typer.Exit()
+    # Default: launch the TUI dojo shell.
+    from .app import run as _run_app
+
+    _run_app()
 
 
 if __name__ == "__main__":  # pragma: no cover

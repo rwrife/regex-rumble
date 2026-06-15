@@ -44,6 +44,26 @@ Three panes appear:
 
 Press `s` to summon the sensei. It will forge adversarial edge-case strings and try to break your pattern. If it does, you lose HP. Earn streaks, climb the belts.
 
+### Keys
+- `s` — sensei attack
+- `r` — reset round (refills HP, keeps XP/belt)
+- `e` — end-of-round summary (belt, streaks, totals)
+- `?` — help
+- `q` — quit
+
+### Belts & progression
+XP accumulates across sessions and promotes you through the belt ranks
+(white → yellow → orange → green → blue → purple → brown → black).
+Wins (an attack you survived with zero misses) build a streak; one miss
+resets it. Progress lives in `~/.regex-rumble/state.json` (override with
+the `REGEX_RUMBLE_HOME` env var).
+
+### Daily challenge
+```bash
+regex-rumble --daily
+```
+Loads a seeded challenge — same allies/enemies for everyone, every day.
+
 ## Why
 Most regex tools are passive testers. `regex-rumble` is adversarial — it actively hunts the cases you forgot.
 

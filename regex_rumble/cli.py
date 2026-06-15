@@ -36,6 +36,9 @@ def main(
     banner: bool = typer.Option(
         False, "--banner", help="Print the banner and exit (skip the TUI)."
     ),
+    daily: bool = typer.Option(
+        False, "--daily", help="Load today's seeded daily challenge into the dojo."
+    ),
 ) -> None:
     """Run the regex-rumble dojo (or show version)."""
     if version:
@@ -49,7 +52,7 @@ def main(
     # Default: launch the TUI dojo shell.
     from .app import run as _run_app
 
-    _run_app()
+    _run_app(daily=daily)
 
 
 if __name__ == "__main__":  # pragma: no cover

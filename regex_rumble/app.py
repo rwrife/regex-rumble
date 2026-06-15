@@ -15,6 +15,7 @@ from textual.widgets import Footer, Header, Static, TextArea
 
 from . import __version__
 from .engine import EvaluationResult, ExampleResult, evaluate
+from .sensei import AttackProvider, AttackReport, run_attack
 
 EMPTY_PATTERN = ""
 EMPTY_ALLIES = "# One ally string per line — must MATCH.\n"
@@ -131,6 +132,7 @@ class HelpScreen(ModalScreen):
         "tab          cycle focus forward\n"
         "shift+tab    cycle focus backward\n"
         "1 / 2 / 3    jump to Pattern / Allies / Enemies\n"
+        "s            sensei attack (adversarial examples)\n"
         "?            toggle this help\n"
         "q            quit\n"
     )
@@ -166,14 +168,25 @@ class RegexRumbleApp(App):
         background: $error;
         color: $text;
     }
+    #hp-bar {
+        dock: bottom;
+        height: 1;
+        padding: 0 1;
+        background: $panel;
+        color: $accent;
+        text-style: bold;
+    }
     """
 
     TITLE = "regex-rumble"
     SUB_TITLE = f"dojo · v{__version__}"
 
+    MAX_HP = 100
+
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("question_mark", "help", "Help"),
+        Binding("s", "sensei_attack", "Sensei attack"),
         Binding("tab", "focus_next_pane", "Next pane", show=False),
         Binding("shift+tab", "focus_prev_pane", "Prev pane", show=False),
         Binding("1", "focus_pane('pattern-pane')", "Pattern", show=False),
@@ -182,6 +195,13 @@ class RegexRumbleApp(App):
     ]
 
     PANE_ORDER = ("pattern-pane", "allies-pane", "enemies-pane")
+
+    def __init__(self, *, sensei_provider: AttackProvider | None = None) -> None:
+        super().__init__()
+        self._sensei_provider = sensei_provider
+        self._hp = self.MAX_HP
+        self._xp = 0
+        self._last_attack: AttackReport | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -193,8 +213,12 @@ class RegexRumbleApp(App):
             yield DojoPane(
                 "🔴 Enemies (must NOT match)", EMPTY_ENEMIES, "enemies-pane", with_results=True
             )
+        yield Static(self._hp_line(), id="hp-bar")
         yield Static("no examples yet — add allies and enemies", id="status-bar")
         yield Footer()
+
+    def _hp_line(self) -> str:
+        return f"HP {self._hp}/{self.MAX_HP} · XP {self._xp}"
 
     def on_mount(self) -> None:
         self.action_focus_pane("pattern-pane")
@@ -213,13 +237,7 @@ class RegexRumbleApp(App):
         pattern, allies, enemies = self._gather_text()
         # The pattern pane is a single-line concept; collapse to first non-empty
         # non-comment line so users can leave hint text in the textarea later.
-        pattern_line = ""
-        for raw in pattern.splitlines():
-            stripped = raw.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            pattern_line = raw
-            break
+        pattern_line = _first_pattern_line(pattern)
         result = evaluate(pattern_line, allies, enemies)
         self.query_one("#allies-pane", DojoPane).set_results(
             _format_results(result.allies, valid=result.valid)
@@ -274,6 +292,57 @@ class RegexRumbleApp(App):
 
     def action_help(self) -> None:
         self.push_screen(HelpScreen())
+
+    # --- sensei attack --------------------------------------------------
+
+    def action_sensei_attack(self) -> AttackReport:
+        pattern, allies_blob, enemies_blob = self._gather_text()
+        pattern_line = _first_pattern_line(pattern)
+        from .engine import split_examples
+
+        allies = split_examples(allies_blob)
+        enemies = split_examples(enemies_blob)
+
+        report = run_attack(
+            pattern_line, allies, enemies, provider=self._sensei_provider
+        )
+        self._last_attack = report
+
+        # Bank XP for correct classifications, drop HP for misses.
+        self._xp += report.xp
+        self._hp = max(0, self._hp - report.damage)
+
+        # Add the attack strings to the appropriate panes so the user can
+        # see the new examples and the dots re-paint.
+        if report.attacks:
+            new_allies = [a.text for a in report.attacks if a.should_match]
+            new_enemies = [a.text for a in report.attacks if not a.should_match]
+            if new_allies:
+                self._append_to_pane("allies-pane", new_allies)
+            if new_enemies:
+                self._append_to_pane("enemies-pane", new_enemies)
+            self._refresh_evaluation()
+
+        self.query_one("#hp-bar", Static).update(self._hp_line())
+        self.query_one("#status-bar", Static).update(report.summary())
+        return report
+
+    def _append_to_pane(self, pane_id: str, lines: list[str]) -> None:
+        editor = self.query_one(f"#{pane_id}", DojoPane).query_one(TextArea)
+        existing = editor.text
+        suffix = "\n".join(lines)
+        if existing and not existing.endswith("\n"):
+            existing += "\n"
+        editor.text = existing + suffix + "\n"
+
+
+def _first_pattern_line(blob: str) -> str:
+    for raw in blob.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        return raw
+    return ""
 
 
 def run() -> None:

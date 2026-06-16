@@ -16,6 +16,12 @@ from textual.widgets import Footer, Header, Static, TextArea
 from . import __version__
 from .engine import EvaluationResult, ExampleResult, evaluate
 from .sensei import AttackProvider, AttackReport, run_attack
+from .state import (
+    DailyChallenge,
+    DojoState,
+    load_state,
+    save_state,
+)
 
 EMPTY_PATTERN = ""
 EMPTY_ALLIES = "# One ally string per line — must MATCH.\n"
@@ -133,6 +139,8 @@ class HelpScreen(ModalScreen):
         "shift+tab    cycle focus backward\n"
         "1 / 2 / 3    jump to Pattern / Allies / Enemies\n"
         "s            sensei attack (adversarial examples)\n"
+        "r            reset round (full HP, keep XP/belt)\n"
+        "e            end-of-round summary\n"
         "?            toggle this help\n"
         "q            quit\n"
     )
@@ -142,6 +150,97 @@ class HelpScreen(ModalScreen):
             yield Static("regex-rumble — key bindings", classes="help-title")
             yield Static(self.HELP_TEXT)
             yield Static("\n(press esc, ?, or q to close)")
+
+    def action_dismiss(self, result: object | None = None) -> None:  # type: ignore[override]
+        self.app.pop_screen()
+
+
+class BeltPromotionScreen(ModalScreen):
+    """Tiny celebratory modal shown when the player crosses a belt threshold."""
+
+    BINDINGS = [Binding("escape,enter,space,q", "dismiss", "Close")]
+
+    DEFAULT_CSS = """
+    BeltPromotionScreen {
+        align: center middle;
+    }
+    BeltPromotionScreen > Vertical {
+        width: 50;
+        height: auto;
+        border: thick $success;
+        background: $surface;
+        padding: 1 2;
+    }
+    BeltPromotionScreen .belt-title {
+        text-style: bold;
+        color: $success;
+        padding-bottom: 1;
+    }
+    """
+
+    def __init__(self, old_belt: str, new_belt: str) -> None:
+        super().__init__()
+        self._old = old_belt
+        self._new = new_belt
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Static("🎉  BELT PROMOTION  🎉", classes="belt-title")
+            yield Static(f"{self._old} → {self._new}")
+            yield Static("\nKeep training. (press any key)")
+
+    def action_dismiss(self, result: object | None = None) -> None:  # type: ignore[override]
+        self.app.pop_screen()
+
+
+class EndOfRoundScreen(ModalScreen):
+    """Round summary: belt, HP, XP, streaks, totals."""
+
+    BINDINGS = [Binding("escape,enter,space,q", "dismiss", "Close")]
+
+    DEFAULT_CSS = """
+    EndOfRoundScreen {
+        align: center middle;
+    }
+    EndOfRoundScreen > Vertical {
+        width: 60;
+        height: auto;
+        border: round $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    EndOfRoundScreen .summary-title {
+        text-style: bold;
+        color: $accent;
+        padding-bottom: 1;
+    }
+    """
+
+    def __init__(self, state: DojoState, *, outcome: object | None = None) -> None:
+        super().__init__()
+        self._state = state
+        self._outcome = outcome
+
+    def compose(self) -> ComposeResult:
+        s = self._state
+        belt = s.belt
+        nxt = s.xp_to_next()
+        belt_line = (
+            f"{belt.emoji} {belt.name} belt (max rank)"
+            if nxt is None
+            else f"{belt.emoji} {belt.name} belt — {nxt} XP to next"
+        )
+        lines = [
+            belt_line,
+            f"HP {s.hp}/{s.max_hp}    XP {s.xp}",
+            f"wins {s.total_wins} · losses {s.total_losses}",
+            f"streak {s.current_streak} (best {s.best_streak})",
+        ]
+        with Vertical():
+            yield Static("⚔️  end of round  ⚔️", classes="summary-title")
+            for line in lines:
+                yield Static(line)
+            yield Static("\n(press any key to keep training)")
 
     def action_dismiss(self, result: object | None = None) -> None:  # type: ignore[override]
         self.app.pop_screen()
@@ -187,6 +286,8 @@ class RegexRumbleApp(App):
         Binding("q", "quit", "Quit"),
         Binding("question_mark", "help", "Help"),
         Binding("s", "sensei_attack", "Sensei attack"),
+        Binding("r", "reset_round", "Reset round"),
+        Binding("e", "end_of_round", "Summary"),
         Binding("tab", "focus_next_pane", "Next pane", show=False),
         Binding("shift+tab", "focus_prev_pane", "Prev pane", show=False),
         Binding("1", "focus_pane('pattern-pane')", "Pattern", show=False),
@@ -196,11 +297,19 @@ class RegexRumbleApp(App):
 
     PANE_ORDER = ("pattern-pane", "allies-pane", "enemies-pane")
 
-    def __init__(self, *, sensei_provider: AttackProvider | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        sensei_provider: AttackProvider | None = None,
+        state: DojoState | None = None,
+        state_path: object | None = None,
+        daily: DailyChallenge | None = None,
+    ) -> None:
         super().__init__()
         self._sensei_provider = sensei_provider
-        self._hp = self.MAX_HP
-        self._xp = 0
+        self._state_path = state_path
+        self._state: DojoState = state if state is not None else load_state(state_path)
+        self._daily = daily
         self._last_attack: AttackReport | None = None
 
     def compose(self) -> ComposeResult:
@@ -218,11 +327,34 @@ class RegexRumbleApp(App):
         yield Footer()
 
     def _hp_line(self) -> str:
-        return f"HP {self._hp}/{self.MAX_HP} · XP {self._xp}"
+        s = self._state
+        belt = s.belt
+        nxt = s.xp_to_next()
+        if nxt is None:
+            belt_part = f"{belt.emoji} {belt.name} belt (max)"
+        else:
+            belt_part = f"{belt.emoji} {belt.name} belt · {nxt} XP to next"
+        return (
+            f"HP {s.hp}/{s.max_hp} · XP {s.xp} · {belt_part} · "
+            f"streak {s.current_streak} (best {s.best_streak})"
+        )
 
     def on_mount(self) -> None:
+        if self._daily is not None:
+            self._prefill_daily(self._daily)
         self.action_focus_pane("pattern-pane")
         self._refresh_evaluation()
+
+    def _prefill_daily(self, daily: DailyChallenge) -> None:
+        allies_pane = self.query_one("#allies-pane", DojoPane).query_one(TextArea)
+        enemies_pane = self.query_one("#enemies-pane", DojoPane).query_one(TextArea)
+        header = f"# daily {daily.iso_date} — {daily.name}\n# {daily.hint}\n"
+        allies_pane.text = header + "\n".join(daily.allies) + "\n"
+        enemies_pane.text = (
+            f"# daily {daily.iso_date} — reject these\n"
+            + "\n".join(daily.enemies)
+            + "\n"
+        )
 
     # --- evaluation -----------------------------------------------------
 
@@ -308,9 +440,9 @@ class RegexRumbleApp(App):
         )
         self._last_attack = report
 
-        # Bank XP for correct classifications, drop HP for misses.
-        self._xp += report.xp
-        self._hp = max(0, self._hp - report.damage)
+        outcome = self._state.apply_attack(xp_gained=report.xp, damage=report.damage)
+        if self._daily is not None and outcome.won:
+            self._state.record_daily(self._daily.iso_date)
 
         # Add the attack strings to the appropriate panes so the user can
         # see the new examples and the dots re-paint.
@@ -324,8 +456,34 @@ class RegexRumbleApp(App):
             self._refresh_evaluation()
 
         self.query_one("#hp-bar", Static).update(self._hp_line())
-        self.query_one("#status-bar", Static).update(report.summary())
+        suffix = outcome.headline()
+        status = report.summary() + (f"  ·  {suffix}" if suffix != "no change" else "")
+        self.query_one("#status-bar", Static).update(status)
+
+        try:
+            save_state(self._state, self._state_path)
+        except OSError:  # pragma: no cover — disk hiccups shouldn't crash play
+            pass
+
+        if outcome.promoted:
+            self.push_screen(
+                BeltPromotionScreen(outcome.belt_before.name, outcome.belt_after.name)
+            )
+        elif outcome.knocked_out:
+            self.push_screen(EndOfRoundScreen(self._state, outcome=outcome))
         return report
+
+    def action_reset_round(self) -> None:
+        self._state.reset_round()
+        try:
+            save_state(self._state, self._state_path)
+        except OSError:  # pragma: no cover
+            pass
+        self.query_one("#hp-bar", Static).update(self._hp_line())
+        self.query_one("#status-bar", Static).update("round reset — full HP, keep training")
+
+    def action_end_of_round(self) -> None:
+        self.push_screen(EndOfRoundScreen(self._state))
 
     def _append_to_pane(self, pane_id: str, lines: list[str]) -> None:
         editor = self.query_one(f"#{pane_id}", DojoPane).query_one(TextArea)
@@ -345,6 +503,10 @@ def _first_pattern_line(blob: str) -> str:
     return ""
 
 
-def run() -> None:
+def run(*, daily: bool = False) -> None:
     """Launch the dojo."""
-    RegexRumbleApp().run()
+    challenge: DailyChallenge | None = None
+    if daily:
+        from .state import daily_challenge
+        challenge = daily_challenge()
+    RegexRumbleApp(daily=challenge).run()

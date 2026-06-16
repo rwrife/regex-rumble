@@ -64,6 +64,14 @@ regex-rumble --daily
 ```
 Loads a seeded challenge — same allies/enemies for everyone, every day.
 
+### ReDoS warning banner
+
+If your pattern matches a known catastrophic-backtracking shape (nested
+quantifiers like `(a+)+`, overlapping alternation like `(a|ab)*`, or
+adjacent greedy wildcards like `.*.*`), a yellow banner appears above the
+status bar. It's a heuristic, not a proof — but it flags the patterns
+most likely to bite you in production.
+
 ## Why
 Most regex tools are passive testers. `regex-rumble` is adversarial — it actively hunts the cases you forgot.
 

@@ -39,6 +39,13 @@ def main(
     daily: bool = typer.Option(
         False, "--daily", help="Load today's seeded daily challenge into the dojo."
     ),
+    bundle: str | None = typer.Option(
+        None,
+        "--bundle",
+        "-b",
+        metavar="PATH_OR_URL",
+        help="Load a shareable challenge bundle (file, regex-rumble:// URL, or https URL).",
+    ),
 ) -> None:
     """Run the regex-rumble dojo (or show version)."""
     if version:
@@ -52,7 +59,53 @@ def main(
     # Default: launch the TUI dojo shell.
     from .app import run as _run_app
 
-    _run_app(daily=daily)
+    _run_app(daily=daily, bundle=bundle)
+
+
+@app.command("export-bundle")
+def export_bundle(
+    out: str = typer.Argument(..., help="Output path for the JSON bundle file."),
+    name: str = typer.Option(..., "--name", help="Challenge name."),
+    hint: str = typer.Option("", "--hint", help="One-line description / hint."),
+    ally: list[str] = typer.Option(  # noqa: B008
+        [], "--ally", "-a", help="Ally string (repeatable). Must match."
+    ),
+    enemy: list[str] = typer.Option(  # noqa: B008
+        [], "--enemy", "-e", help="Enemy string (repeatable). Must NOT match."
+    ),
+    goal: str | None = typer.Option(
+        None, "--goal", help="Optional goal pattern (leave unset for blind challenges)."
+    ),
+    author: str | None = typer.Option(None, "--author", help="Bundle author."),
+    print_url: bool = typer.Option(
+        False, "--print-url", help="Also print a shareable regex-rumble:// URL."
+    ),
+) -> None:
+    """Write a shareable challenge bundle to disk."""
+    from .bundle import ChallengeBundle
+
+    challenge = ChallengeBundle(
+        name=name,
+        hint=hint,
+        allies=tuple(ally),
+        enemies=tuple(enemy),
+        goal_pattern=goal,
+        author=author,
+    )
+    path = challenge.write_file(out)
+    typer.echo(f"wrote {path}")
+    if print_url:
+        typer.echo(challenge.to_url())
+
+
+@app.command("share-bundle")
+def share_bundle(
+    source: str = typer.Argument(..., help="Bundle path or regex-rumble:// URL."),
+) -> None:
+    """Print a shareable regex-rumble:// URL for a bundle."""
+    from .bundle import load_bundle
+
+    typer.echo(load_bundle(source).to_url())
 
 
 if __name__ == "__main__":  # pragma: no cover

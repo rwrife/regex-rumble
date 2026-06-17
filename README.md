@@ -64,6 +64,25 @@ regex-rumble --daily
 ```
 Loads a seeded challenge — same allies/enemies for everyone, every day.
 
+### Shareable challenge bundles
+
+Build a challenge once, ship it everywhere:
+
+```bash
+regex-rumble export-bundle ipv4.json \
+  --name ipv4-strict --hint "dotted-quad IPv4" \
+  -a 1.2.3.4 -a 127.0.0.1 \
+  -e 256.1.1.1 -e 1.2.3 \
+  --goal '^\d{1,3}(\.\d{1,3}){3}$' --print-url
+
+regex-rumble --bundle ipv4.json          # load from file
+regex-rumble --bundle 'regex-rumble://challenge/...'   # load from URL
+```
+
+Bundles are stdlib JSON; the `regex-rumble://` URL is just compact base64
+so it survives chat clients. Goal patterns are optional — leave them out
+for blind multiplayer challenges where each player invents their own.
+
 ### ReDoS warning banner
 
 If your pattern matches a known catastrophic-backtracking shape (nested

@@ -14,6 +14,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Static, TextArea
 
 from . import __version__
+from .bundle import ChallengeBundle, load_bundle
 from .engine import EvaluationResult, ExampleResult, evaluate
 from .sensei import AttackProvider, AttackReport, run_attack
 from .state import (
@@ -315,12 +316,14 @@ class RegexRumbleApp(App):
         state: DojoState | None = None,
         state_path: object | None = None,
         daily: DailyChallenge | None = None,
+        bundle: ChallengeBundle | None = None,
     ) -> None:
         super().__init__()
         self._sensei_provider = sensei_provider
         self._state_path = state_path
         self._state: DojoState = state if state is not None else load_state(state_path)
         self._daily = daily
+        self._bundle = bundle
         self._last_attack: AttackReport | None = None
 
     def compose(self) -> ComposeResult:
@@ -354,6 +357,8 @@ class RegexRumbleApp(App):
     def on_mount(self) -> None:
         if self._daily is not None:
             self._prefill_daily(self._daily)
+        if self._bundle is not None:
+            self._prefill_bundle(self._bundle)
         self.action_focus_pane("pattern-pane")
         self._refresh_evaluation()
 
@@ -367,6 +372,17 @@ class RegexRumbleApp(App):
             + "\n".join(daily.enemies)
             + "\n"
         )
+
+    def _prefill_bundle(self, bundle: ChallengeBundle) -> None:
+        pattern_pane = self.query_one("#pattern-pane", DojoPane).query_one(TextArea)
+        allies_pane = self.query_one("#allies-pane", DojoPane).query_one(TextArea)
+        enemies_pane = self.query_one("#enemies-pane", DojoPane).query_one(TextArea)
+        hint = f" — {bundle.hint}" if bundle.hint else ""
+        header = f"# bundle: {bundle.name}{hint}\n"
+        if bundle.goal_pattern is not None:
+            pattern_pane.text = bundle.goal_pattern
+        allies_pane.text = header + "\n".join(bundle.allies) + ("\n" if bundle.allies else "")
+        enemies_pane.text = header + "\n".join(bundle.enemies) + ("\n" if bundle.enemies else "")
 
     # --- evaluation -----------------------------------------------------
 
@@ -522,10 +538,13 @@ def _first_pattern_line(blob: str) -> str:
     return ""
 
 
-def run(*, daily: bool = False) -> None:
+def run(*, daily: bool = False, bundle: str | None = None) -> None:
     """Launch the dojo."""
     challenge: DailyChallenge | None = None
     if daily:
         from .state import daily_challenge
         challenge = daily_challenge()
-    RegexRumbleApp(daily=challenge).run()
+    loaded_bundle: ChallengeBundle | None = None
+    if bundle:
+        loaded_bundle = load_bundle(bundle)
+    RegexRumbleApp(daily=challenge, bundle=loaded_bundle).run()

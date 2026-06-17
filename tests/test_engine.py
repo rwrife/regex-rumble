@@ -69,3 +69,46 @@ def test_failing_ally_and_failing_enemy_are_marked() -> None:
     result = evaluate(r"^foo", "foo\nbar", "carrot\nfoozilla")
     assert [r.passed for r in result.allies] == [True, False]
     assert [r.passed for r in result.enemies] == [True, False]
+
+
+def test_redos_risk_flags_nested_quantifiers() -> None:
+    from regex_rumble.engine import redos_risk
+
+    assert redos_risk(r"(a+)+") is not None
+    assert redos_risk(r"(a*)*b") is not None
+    assert redos_risk(r"(.+)+") is not None
+
+
+def test_redos_risk_flags_overlapping_alternation() -> None:
+    from regex_rumble.engine import redos_risk
+
+    assert redos_risk(r"(a|a)+") is not None
+    assert redos_risk(r"(a|ab)*") is not None
+
+
+def test_redos_risk_flags_adjacent_greedy_wildcards() -> None:
+    from regex_rumble.engine import redos_risk
+
+    assert redos_risk(r".*.*") is not None
+    assert redos_risk(r".+.+") is not None
+
+
+def test_redos_risk_silent_for_safe_patterns() -> None:
+    from regex_rumble.engine import redos_risk
+
+    assert redos_risk(r"^foo$") is None
+    assert redos_risk(r"\d{3}-\d{4}") is None
+    assert redos_risk(r"[A-Za-z0-9_.+-]+@[A-Za-z0-9-]+\.[A-Za-z]{2,}") is None
+    assert redos_risk("") is None
+
+
+def test_evaluation_carries_redos_warning_on_risky_pattern() -> None:
+    result = evaluate(r"(a+)+$", "aaaa", "bbbb")
+    assert result.valid is True
+    assert result.redos_warning is not None
+    assert "backtrack" in result.redos_warning.lower() or "redos" in result.redos_warning.lower()
+
+
+def test_evaluation_no_warning_for_safe_pattern() -> None:
+    result = evaluate(r"^foo$", "foo", "bar")
+    assert result.redos_warning is None

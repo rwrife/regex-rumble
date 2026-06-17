@@ -275,6 +275,17 @@ class RegexRumbleApp(App):
         color: $accent;
         text-style: bold;
     }
+    #redos-banner {
+        dock: bottom;
+        height: 0;
+        padding: 0 1;
+        background: $warning;
+        color: $text;
+        text-style: bold;
+    }
+    #redos-banner.-visible {
+        height: 1;
+    }
     """
 
     TITLE = "regex-rumble"
@@ -323,6 +334,7 @@ class RegexRumbleApp(App):
                 "🔴 Enemies (must NOT match)", EMPTY_ENEMIES, "enemies-pane", with_results=True
             )
         yield Static(self._hp_line(), id="hp-bar")
+        yield Static("", id="redos-banner")
         yield Static("no examples yet — add allies and enemies", id="status-bar")
         yield Footer()
 
@@ -380,6 +392,13 @@ class RegexRumbleApp(App):
         status = self.query_one("#status-bar", Static)
         status.update(result.status_line())
         status.set_class(not result.valid and bool(pattern_line), "-invalid")
+        banner = self.query_one("#redos-banner", Static)
+        if result.redos_warning:
+            banner.update(f"⚠ ReDoS risk: {result.redos_warning}")
+            banner.set_class(True, "-visible")
+        else:
+            banner.update("")
+            banner.set_class(False, "-visible")
         return result
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:  # noqa: D401

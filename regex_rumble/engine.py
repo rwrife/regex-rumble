@@ -36,6 +36,7 @@ class EvaluationResult:
     error: str | None
     allies: tuple[ExampleResult, ...] = field(default_factory=tuple)
     enemies: tuple[ExampleResult, ...] = field(default_factory=tuple)
+    redos_warning: str | None = None
 
     @property
     def ally_pass_count(self) -> int:
@@ -72,6 +73,44 @@ class EvaluationResult:
 @lru_cache(maxsize=128)
 def _compile(pattern: str) -> re.Pattern[str]:
     return re.compile(pattern)
+
+
+# Catastrophic-backtracking heuristics.  We can't prove ReDoS in the general
+# case (it's basically undecidable) but a handful of patterns are notorious
+# for triggering exponential blow-up in PCRE-style engines.  Flag those so
+# the dojo can show a banner before the user gets bitten in prod.
+_REDOS_PATTERNS: tuple[tuple[str, str], ...] = (
+    # (a+)+ , (a*)*, (.+)+ etc. — quantified group with an inner quantifier.
+    (
+        r"\((?:\?[:=!])?[^()]*[+*][^()]*\)[+*]",
+        "nested quantifiers like (a+)+ can backtrack exponentially",
+    ),
+    # Overlapping alternation: (a|a)+, (a|ab)+, (.|.)+
+    (
+        r"\((?:\?[:=!])?[^()|]+\|[^()]*\)[+*]",
+        "alternation with overlapping branches inside a quantifier is a classic ReDoS trap",
+    ),
+    # .*.* or .+.+ — adjacent greedy wildcards
+    (r"\.[+*]\.[+*]", "adjacent greedy wildcards (.*.*) can backtrack badly"),
+)
+_REDOS_COMPILED: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (re.compile(p), msg) for p, msg in _REDOS_PATTERNS
+)
+
+
+def redos_risk(pattern: str) -> str | None:
+    """Return a human-readable warning if ``pattern`` smells ReDoS-prone.
+
+    Returns ``None`` when nothing obvious trips.  This is a heuristic, not
+    a proof — false positives and false negatives both happen.  The goal is
+    to nudge the user, not to gate execution.
+    """
+    if not pattern:
+        return None
+    for rx, msg in _REDOS_COMPILED:
+        if rx.search(pattern):
+            return msg
+    return None
 
 
 def split_examples(blob: str) -> list[str]:
@@ -125,6 +164,8 @@ def evaluate(
     ally_list = split_examples(allies) if isinstance(allies, str) else [s for s in allies if s]
     enemy_list = split_examples(enemies) if isinstance(enemies, str) else [s for s in enemies if s]
 
+    warning = redos_risk(pattern)
+
     if not pattern:
         return EvaluationResult(
             pattern=pattern,
@@ -132,6 +173,7 @@ def evaluate(
             error="empty pattern",
             allies=tuple(ExampleResult(t, False, False) for t in ally_list),
             enemies=tuple(ExampleResult(t, False, False) for t in enemy_list),
+            redos_warning=warning,
         )
 
     try:
@@ -143,6 +185,7 @@ def evaluate(
             error=str(exc),
             allies=tuple(ExampleResult(t, False, False) for t in ally_list),
             enemies=tuple(ExampleResult(t, False, False) for t in enemy_list),
+            redos_warning=warning,
         )
 
     return EvaluationResult(
@@ -151,4 +194,5 @@ def evaluate(
         error=None,
         allies=_score(compiled, ally_list, should_match=True),
         enemies=_score(compiled, enemy_list, should_match=False),
+        redos_warning=warning,
     )

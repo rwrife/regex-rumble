@@ -108,5 +108,32 @@ def share_bundle(
     typer.echo(load_bundle(source).to_url())
 
 
+@app.command("lint")
+def lint_pattern(
+    pattern: str = typer.Argument(..., help="Regex pattern to lint."),
+    flavor: str = typer.Option(
+        "python",
+        "--flavor",
+        "-f",
+        help="Target regex flavor: python, pcre, re2, js, go, rust, dotnet.",
+    ),
+) -> None:
+    """Lint a pattern for compatibility footguns in a target regex flavor."""
+    from .flavors import describe, lint
+
+    try:
+        warnings = lint(pattern, flavor)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    typer.echo(f"flavor: {describe(flavor)}")
+    if not warnings:
+        typer.echo("no compatibility issues found ✓")
+        return
+    for w in warnings:
+        typer.echo("  - " + w.format())
+    raise typer.Exit(code=1)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()

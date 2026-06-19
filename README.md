@@ -91,6 +91,22 @@ adjacent greedy wildcards like `.*.*`), a yellow banner appears above the
 status bar. It's a heuristic, not a proof — but it flags the patterns
 most likely to bite you in production.
 
+### Regex flavor lint
+
+Different regex flavors disagree on the fun bits — RE2/Go reject
+lookaround and backreferences, JavaScript uses `(?<name>...)` instead of
+Python's `(?P<name>...)`, only .NET supports conditional `(?(cond)yes|no)`,
+etc. Run the linter before pasting a pattern into a foreign codebase:
+
+```
+regex-rumble lint '(?=foo)\1' --flavor re2
+# - [re2] lookaround assertions are not supported (near '(?=')
+# - [re2] backreferences are not supported (near '\1')
+```
+
+Supported flavors: `python` (default), `pcre`, `re2`, `js`, `go`, `rust`,
+`dotnet`. Exit code is `0` when clean, `1` when warnings fire.
+
 ## Why
 Most regex tools are passive testers. `regex-rumble` is adversarial — it actively hunts the cases you forgot.
 

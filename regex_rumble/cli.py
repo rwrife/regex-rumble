@@ -46,6 +46,11 @@ def main(
         metavar="PATH_OR_URL",
         help="Load a shareable challenge bundle (file, regex-rumble:// URL, or https URL).",
     ),
+    serve_mcp: bool = typer.Option(
+        False,
+        "--serve-mcp",
+        help="Run as an MCP server on stdio (exposes `evaluate` + `attack` tools).",
+    ),
 ) -> None:
     """Run the regex-rumble dojo (or show version)."""
     if version:
@@ -55,6 +60,11 @@ def main(
         return
     if banner:
         _print_banner()
+        raise typer.Exit()
+    if serve_mcp:
+        from .mcp import run_server
+
+        run_server()
         raise typer.Exit()
     # Default: launch the TUI dojo shell.
     from .app import run as _run_app

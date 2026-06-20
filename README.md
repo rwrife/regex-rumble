@@ -107,6 +107,38 @@ regex-rumble lint '(?=foo)\1' --flavor re2
 Supported flavors: `python` (default), `pcre`, `re2`, `js`, `go`, `rust`,
 `dotnet`. Exit code is `0` when clean, `1` when warnings fire.
 
+### MCP server mode
+
+Expose the dojo as a [Model Context Protocol](https://modelcontextprotocol.io)
+server so coding agents (Claude, Cursor, OpenAI Agents SDK, etc.) can fuzz
+your regex before you commit it:
+
+```bash
+regex-rumble --serve-mcp
+```
+
+This speaks newline-delimited JSON-RPC 2.0 over stdio and ships two tools:
+
+- **`evaluate`** — run a pattern against ally/enemy example lists, returning
+  per-example pass/fail, totals, and a ReDoS warning when the pattern looks
+  risky.
+- **`attack`** — let the sensei generate adversarial examples and report
+  which ones the pattern misclassifies. Falls back to canned attacks when
+  no LLM API key is configured.
+
+Example agent config (Claude Desktop / Codex CLI style):
+
+```json
+{
+  "mcpServers": {
+    "regex-rumble": {
+      "command": "regex-rumble",
+      "args": ["--serve-mcp"]
+    }
+  }
+}
+```
+
 ## Why
 Most regex tools are passive testers. `regex-rumble` is adversarial — it actively hunts the cases you forgot.
 

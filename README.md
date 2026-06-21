@@ -107,6 +107,29 @@ regex-rumble lint '(?=foo)\1' --flavor re2
 Supported flavors: `python` (default), `pcre`, `re2`, `js`, `go`, `rust`,
 `dotnet`. Exit code is `0` when clean, `1` when warnings fire.
 
+### ReDoS dojo
+
+Dedicated mode for hunting **catastrophic backtracking**. Static heuristics
+flag classic shapes (`(a+)+`, `(a|a)+`, `.*.*`, `(a?)+`) and a pump-string
+generator times the pattern against inputs of growing length in a watchdog
+subprocess so you can *see* the exponential curve:
+
+```
+regex-rumble redos '(a+)+$' --timeout 1 --max-len 28
+# static check: 1 suspicious construct(s)
+#   - [nested-quantifier sev=3] 0:5 `(a+)+` — nested quantifiers...
+# pump trace:
+#    len          ms  graph
+#      8        2.41  ███
+#     16      612.30  ██████████████████████████████
+#     20     TIMEOUT  ██████████████████████████████ ⏱
+```
+
+Exit code is `1` when the pattern times out or a high-severity construct is
+found, `0` otherwise — handy for CI gates. The same primitives are exposed
+as `regex_rumble.redos.detect`, `pump_strings`, and `trace` for programmatic
+use.
+
 ### MCP server mode
 
 Expose the dojo as a [Model Context Protocol](https://modelcontextprotocol.io)

@@ -145,5 +145,32 @@ def lint_pattern(
     raise typer.Exit(code=1)
 
 
+@app.command("redos")
+def redos_dojo(
+    pattern: str = typer.Argument(..., help="Regex pattern to probe for ReDoS."),
+    timeout: float = typer.Option(
+        1.0, "--timeout", "-t", help="Per-step watchdog timeout (seconds)."
+    ),
+    max_len: int = typer.Option(
+        28, "--max-len", "-n", help="Largest pump length to try."
+    ),
+    step: int = typer.Option(
+        4, "--step", "-s", help="Pump-length increment."
+    ),
+) -> None:
+    """Hunt catastrophic backtracking: static scan + timed pump trace."""
+    from .redos import detect, render_report, trace
+
+    if step <= 0 or max_len <= 0:
+        typer.echo("--step and --max-len must be positive", err=True)
+        raise typer.Exit(code=2)
+    lengths = tuple(range(step, max_len + 1, step))
+    findings = detect(pattern)
+    steps = trace(pattern, lengths=lengths, timeout_s=timeout)
+    typer.echo(render_report(pattern, findings, steps))
+    if any(s.timed_out for s in steps) or any(f.severity >= 3 for f in findings):
+        raise typer.Exit(code=1)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()

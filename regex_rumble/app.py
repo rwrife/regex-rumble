@@ -548,3 +548,104 @@ def run(*, daily: bool = False, bundle: str | None = None) -> None:
     if bundle:
         loaded_bundle = load_bundle(bundle)
     RegexRumbleApp(daily=challenge, bundle=loaded_bundle).run()
+
+
+class SpeedrunApp(App):
+    """Minimal Textual app driving a :class:`SpeedrunRun`.
+
+    The pattern input lives in a single TextArea; as soon as the typed
+    pattern classifies the current round correctly, the run auto-advances.
+    A live timer (refreshed twice per second) shows elapsed time.
+    """
+
+    CSS = """
+    #speedrun-header { dock: top; height: 3; padding: 0 1; }
+    #speedrun-body { padding: 0 1; }
+    #speedrun-status { dock: bottom; height: 1; padding: 0 1; color: $accent; }
+    .col { width: 1fr; padding: 0 1; }
+    TextArea { height: 5; }
+    """
+    BINDINGS = [
+        Binding("q", "abort", "abort"),
+        Binding("ctrl+c", "abort", "abort", show=False),
+    ]
+
+    def __init__(self, speedrun_run) -> None:  # type: ignore[no-untyped-def]
+        super().__init__()
+        self.run_state = speedrun_run
+        self.final_summary: str | None = None
+
+    def compose(self) -> ComposeResult:  # pragma: no cover - UI plumbing
+        yield Header()
+        yield Static("", id="speedrun-header")
+        with Horizontal(id="speedrun-body"):
+            with Vertical(classes="col"):
+                yield Static("Pattern (auto-advances on solve)", classes="pane-title")
+                ta = TextArea("", id="speedrun-pattern")
+                ta.show_line_numbers = False
+                yield ta
+                yield Static("", id="speedrun-examples")
+        yield Static("q to abort", id="speedrun-status")
+        yield Footer()
+
+    def on_mount(self) -> None:  # pragma: no cover - UI plumbing
+        self.run_state.start_round()
+        self._refresh()
+        self.set_interval(0.5, self._refresh)
+        self.query_one("#speedrun-pattern", TextArea).focus()
+
+    def on_text_area_changed(self, event) -> None:  # type: ignore[no-untyped-def]
+        # pragma: no cover - UI plumbing
+        pattern = event.text_area.text.splitlines()[0] if event.text_area.text else ""
+        if self.run_state.is_finished:
+            return
+        if self.run_state.submit(pattern):
+            event.text_area.text = ""
+            if self.run_state.is_finished:
+                self._end()
+            else:
+                self.run_state.start_round()
+                self._refresh()
+
+    def action_abort(self) -> None:  # pragma: no cover - UI plumbing
+        self.run_state.abort()
+        self._end()
+
+    def _refresh(self) -> None:  # pragma: no cover - UI plumbing
+        from .speedrun import format_split
+
+        if self.run_state.is_finished:
+            return
+        challenge = self.run_state.current_challenge
+        idx = self.run_state.current_index
+        total = self.run_state.count
+        elapsed = format_split(self.run_state.elapsed_total_s)
+        head = (
+            f"speedrun · round {idx}/{total} · elapsed {elapsed}\n"
+            f"{challenge.name if challenge else ''} — {challenge.hint if challenge else ''}"
+        )
+        self.query_one("#speedrun-header", Static).update(head)
+        if challenge is not None:
+            allies = "\n".join(f"✓ {a}" for a in challenge.allies)
+            enemies = "\n".join(f"✗ {e}" for e in challenge.enemies)
+            self.query_one("#speedrun-examples", Static).update(
+                f"allies must match:\n{allies}\n\nenemies must NOT match:\n{enemies}"
+            )
+
+    def _end(self) -> None:  # pragma: no cover - UI plumbing
+        from .speedrun import load_prs, pr_key, render_summary, save_pr
+
+        result = self.run_state.result()
+        previous = load_prs().get(pr_key(result.pack_id, result.count, result.seed))
+        if not result.aborted and result.all_solved:
+            save_pr(result.pack_id, result.count, result.seed, result.total_elapsed_s)
+        self.final_summary = render_summary(result, previous_pr=previous)
+        self.exit()
+
+
+def run_speedrun(speedrun_run) -> None:  # type: ignore[no-untyped-def]
+    """Run a :class:`SpeedrunRun` in the TUI and print the summary on exit."""
+    app = SpeedrunApp(speedrun_run)
+    app.run()
+    if app.final_summary:
+        print(app.final_summary)

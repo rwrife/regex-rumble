@@ -172,5 +172,47 @@ def redos_dojo(
         raise typer.Exit(code=1)
 
 
+@app.command("speedrun")
+def speedrun_cmd(
+    count: int = typer.Option(10, "--count", "-n", help="Number of rounds in the gauntlet."),
+    bundle: str | None = typer.Option(
+        None, "--bundle", "-b", help="Pack id or path to a JSON challenge pack."
+    ),
+    seed: int | None = typer.Option(
+        None, "--seed", help="Deterministic challenge seed (also used for PR key)."
+    ),
+    headless: bool = typer.Option(
+        False, "--headless", help="Print pack + selection without launching the TUI."
+    ),
+) -> None:
+    """Race the clock through N regex challenges (M5 backlog item)."""
+    from .speedrun import build_run, load_prs, pr_key
+
+    if count <= 0:
+        typer.echo("--count must be positive", err=True)
+        raise typer.Exit(code=2)
+    pack_source = bundle or "speedrun_default"
+    try:
+        run = build_run(count=count, seed=seed, pack_source=pack_source)
+    except Exception as exc:  # pragma: no cover - defensive
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    if headless:
+        typer.echo(f"pack: {run.pack.name} ({run.pack.id})")
+        typer.echo(f"count={run.count} seed={run.seed}")
+        for i, c in enumerate(run.challenges, 1):
+            typer.echo(f"  {i:>2}. {c.name} — {c.hint}")
+        prs = load_prs()
+        best = prs.get(pr_key(run.pack.id, run.count, run.seed))
+        if best is not None:
+            from .speedrun import format_split
+
+            typer.echo(f"current PR: {format_split(best)}")
+        return
+    from .app import run_speedrun as _run
+
+    _run(run)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()

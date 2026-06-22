@@ -25,3 +25,13 @@ def test_cli_banner() -> None:
     result = runner.invoke(app, ["--banner"])
     assert result.exit_code == 0
     assert "regex-rumble" in result.stdout
+
+
+def test_cli_speedrun_headless() -> None:
+    result = runner.invoke(app, ["speedrun", "--count", "3", "--seed", "7", "--headless"])
+    assert result.exit_code == 0
+    assert "pack:" in result.stdout
+    assert "seed=7" in result.stdout
+    # Three numbered lineup entries.
+    assert " 1." in result.stdout
+    assert " 3." in result.stdout

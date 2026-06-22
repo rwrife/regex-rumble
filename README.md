@@ -51,6 +51,22 @@ Press `s` to summon the sensei. It will forge adversarial edge-case strings and 
 - `?` — help
 - `q` — quit
 
+### Speedrun mode
+
+Race the clock through N regex challenges:
+
+```bash
+regex-rumble speedrun                       # 10 rounds from the built-in pack
+regex-rumble speedrun --count 20 --seed 42  # deterministic gauntlet
+regex-rumble speedrun --bundle my-pack.json # a custom pack
+regex-rumble speedrun --headless --seed 1   # print the lineup without the TUI
+```
+
+Each round shows allies + enemies; the run auto-advances the moment your
+pattern classifies them all correctly. Aborts (`q`) don't overwrite your
+personal record. PRs are keyed by `(pack id, count, seed)` and persisted
+alongside the dojo state in `~/.regex-rumble/state.json`.
+
 ### Belts & progression
 XP accumulates across sessions and promotes you through the belt ranks
 (white → yellow → orange → green → blue → purple → brown → black).

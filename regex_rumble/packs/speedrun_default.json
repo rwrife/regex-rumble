@@ -1,0 +1,136 @@
+{
+  "id": "speedrun_default",
+  "name": "Speedrun: classic gauntlet",
+  "version": 1,
+  "challenges": [
+    {
+      "name": "digits only",
+      "hint": "Match strings made of digits.",
+      "allies": ["1", "42", "007"],
+      "enemies": ["a1", "1a", "1 2"]
+    },
+    {
+      "name": "lowercase word",
+      "hint": "Match a lowercase ASCII word.",
+      "allies": ["hello", "world", "abc"],
+      "enemies": ["Hello", "ABC", "ab1"]
+    },
+    {
+      "name": "starts with cap",
+      "hint": "First letter must be uppercase.",
+      "allies": ["Alice", "Bob", "Zed"],
+      "enemies": ["alice", "1Bob", " Bob"]
+    },
+    {
+      "name": "non-empty",
+      "hint": "Match anything non-empty.",
+      "allies": ["x", "hi", "  spaces  "],
+      "enemies": [""]
+    },
+    {
+      "name": "three letters",
+      "hint": "Exactly three ASCII letters.",
+      "allies": ["abc", "XyZ", "foo"],
+      "enemies": ["ab", "abcd", "12c", "a b"]
+    },
+    {
+      "name": "US ZIP codes",
+      "hint": "5-digit ZIPs only.",
+      "allies": ["94110", "10001", "30301"],
+      "enemies": ["1234", "ABCDE", "123456", "12 345"]
+    },
+    {
+      "name": "hex colors",
+      "hint": "3- or 6-digit hex with leading #.",
+      "allies": ["#fff", "#000000", "#ABCDEF", "#1a2b3c"],
+      "enemies": ["fff", "#ggg", "#12345", "rgb(0,0,0)"]
+    },
+    {
+      "name": "phone (US dash)",
+      "hint": "###-###-#### dashed US phones.",
+      "allies": ["415-555-1212", "212-867-5309", "800-123-4567"],
+      "enemies": ["4155551212", "415.555.1212", "415-55-1212", "abc-def-ghij"]
+    },
+    {
+      "name": "time HH:MM",
+      "hint": "24-hour HH:MM.",
+      "allies": ["00:00", "09:30", "23:59", "12:00"],
+      "enemies": ["24:00", "9:30", "12:60", "ab:cd"]
+    },
+    {
+      "name": "snake_case ident",
+      "hint": "lowercase letters and underscores; no leading digit.",
+      "allies": ["x", "foo_bar", "long_snake_case_thing"],
+      "enemies": ["FooBar", "_leading", "1abc", "has space"]
+    },
+    {
+      "name": "semver core",
+      "hint": "MAJOR.MINOR.PATCH, digits only.",
+      "allies": ["1.0.0", "10.20.30", "0.0.1", "99.99.99"],
+      "enemies": ["1.0", "1.0.0.0", "v1.0.0", "1.0.0-rc1"]
+    },
+    {
+      "name": "ipv4 octets",
+      "hint": "Four dotted numeric octets 0-255 (no leading zero).",
+      "allies": ["1.2.3.4", "127.0.0.1", "192.168.1.1", "8.8.8.8"],
+      "enemies": ["256.1.1.1", "1.2.3", "1.2.3.4.5", "01.02.03.04"]
+    },
+    {
+      "name": "uuid v4",
+      "hint": "Lowercase hex UUID v4.",
+      "allies": [
+        "550e8400-e29b-41d4-a716-446655440000",
+        "9b2d3f4a-1234-4abc-89ef-0123456789ab",
+        "ffffffff-ffff-4fff-8fff-ffffffffffff"
+      ],
+      "enemies": [
+        "550e8400e29b41d4a716446655440000",
+        "550E8400-E29B-41D4-A716-446655440000",
+        "not-a-uuid-at-all-nope-nope-nope-nope",
+        "550e8400-e29b-31d4-a716-446655440000"
+      ]
+    },
+    {
+      "name": "email (loose)",
+      "hint": "name@host.tld with a dot in the domain.",
+      "allies": ["a@b.co", "ryan@example.com", "x.y+z@sub.example.org", "u_n@dash-host.io"],
+      "enemies": ["plainaddress", "@nope.com", "name@", "spaces in@x.com", "a@b"]
+    },
+    {
+      "name": "url http(s)",
+      "hint": "http:// or https:// URL.",
+      "allies": ["http://x.io", "https://example.com", "https://a.b/c?d=1"],
+      "enemies": ["ftp://x.io", "example.com", "http:/missing", "javascript:alert(1)"]
+    },
+    {
+      "name": "iso date",
+      "hint": "YYYY-MM-DD calendar date (loose).",
+      "allies": ["2024-01-31", "1999-12-31", "2026-06-22"],
+      "enemies": ["2024-1-1", "24-01-31", "2024/01/31", "2024-13-40"]
+    },
+    {
+      "name": "card 16",
+      "hint": "16 digits, grouped 4-4-4-4 with spaces or dashes.",
+      "allies": ["4111 1111 1111 1111", "4111-1111-1111-1111", "5500 0000 0000 0004"],
+      "enemies": ["4111111111111111", "4111 1111 1111", "abcd efgh ijkl mnop", "4111 1111 1111 11111"]
+    },
+    {
+      "name": "balanced quotes",
+      "hint": "Match \"...\" without an unescaped \" inside.",
+      "allies": ["\"hi\"", "\"hello world\"", "\"\""],
+      "enemies": ["hi", "\"unterminated", "\"a\"b\"", "no quotes"]
+    },
+    {
+      "name": "ipv6 short",
+      "hint": "Compressed IPv6 with ::.",
+      "allies": ["::1", "::", "2001:db8::1", "fe80::abcd"],
+      "enemies": ["1.2.3.4", "2001:db8", "g001::1", ":::1"]
+    },
+    {
+      "name": "password (basic)",
+      "hint": "8+ chars with at least one letter and one digit.",
+      "allies": ["abc12345", "Passw0rd", "longpass9", "x1234567"],
+      "enemies": ["short1", "alllettersxx", "12345678", "abcdefgh"]
+    }
+  ]
+}

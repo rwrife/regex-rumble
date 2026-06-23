@@ -21,7 +21,7 @@ import datetime as _dt
 import json
 import os
 import random
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -97,6 +97,11 @@ class DojoState:
     current_streak: int = 0
     best_streak: int = 0
     last_daily: str | None = None  # ISO date of the last completed daily
+    # Per-feature heatmap counters used by regex_rumble.analytics.
+    # Shape: {"misses": {feature: int}, "totals": {feature: int}}
+    analytics: dict[str, dict[str, int]] = field(
+        default_factory=lambda: {"misses": {}, "totals": {}}
+    )
     version: int = STATE_VERSION
 
     # ---- belts -----------------------------------------------------------

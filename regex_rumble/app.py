@@ -479,6 +479,15 @@ class RegexRumbleApp(App):
         if self._daily is not None and outcome.won:
             self._state.record_daily(self._daily.iso_date)
 
+        # Heatmap analytics: tag each thrown example by feature.
+        from .analytics import record_attack_texts
+
+        record_attack_texts(
+            self._state,
+            [a.text for a in report.correct],
+            [a.text for a in report.misses],
+        )
+
         # Add the attack strings to the appropriate panes so the user can
         # see the new examples and the dots re-paint.
         if report.attacks:

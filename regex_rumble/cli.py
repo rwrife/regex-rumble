@@ -214,5 +214,41 @@ def speedrun_cmd(
     _run(run)
 
 
+@app.command("stats")
+def stats_cmd(
+    json_out: bool = typer.Option(
+        False, "--json", help="Emit a JSON payload instead of the heatmap."
+    ),
+    no_color: bool = typer.Option(False, "--no-color", help="Disable ANSI colors in the heatmap."),
+    reset: bool = typer.Option(False, "--reset", help="Wipe analytics counters (confirm prompt)."),
+    force: bool = typer.Option(False, "--force", help="Skip the confirm prompt for --reset."),
+) -> None:
+    """Show a heatmap of which regex features you keep getting wrong."""
+    from .analytics import heatmap_payload, render_heatmap, reset_analytics
+    from .state import default_state_path, load_state, save_state
+
+    path = default_state_path()
+    state = load_state(path)
+
+    if reset:
+        if not force:
+            typer.confirm(
+                "Reset all heatmap analytics counters? This can't be undone.",
+                abort=True,
+            )
+        reset_analytics(state)
+        save_state(state, path)
+        typer.echo("analytics counters reset ✓")
+        return
+
+    if json_out:
+        import json as _json
+
+        typer.echo(_json.dumps(heatmap_payload(state), indent=2, sort_keys=True))
+        return
+
+    typer.echo(render_heatmap(state, color=not no_color))
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()

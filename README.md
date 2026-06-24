@@ -80,6 +80,34 @@ regex-rumble --daily
 ```
 Loads a seeded challenge — same allies/enemies for everyone, every day.
 
+### Know your weaknesses (heatmap analytics)
+
+Every sensei attack tags the example strings it throws with a feature vector
+(whitespace, unicode, regex metacharacters, mixed case, long strings, etc.).
+Mis-classifications bump a per-feature miss counter so you can see where your
+regex skills actually leak — not just "I lost a round", but *why*.
+
+```bash
+regex-rumble stats              # ASCII heatmap, color-graded by miss rate
+regex-rumble stats --no-color   # plain output (great for piping)
+regex-rumble stats --json       # machine-readable payload
+regex-rumble stats --reset      # wipe counters (confirm prompt)
+```
+
+Example:
+
+```
+Regex weakness heatmap (miss rate per feature)
+────────────────────────────────────────────────────────
+  feature                 bar                   rate    n
+  boundary-whitespace     ████████████████████  100.0%   3
+  whitespace              █████████████░······   66.7%   6
+  unicode                 █████████··········    45.0%   8
+  digit                   ██·················     7.5%  20
+```
+
+Counters live alongside the dojo state in `~/.regex-rumble/state.json`.
+
 ### Shareable challenge bundles
 
 Build a challenge once, ship it everywhere:

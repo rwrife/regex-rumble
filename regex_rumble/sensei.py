@@ -10,11 +10,24 @@ Providers
 ---------
 * :class:`OpenAIProvider` — talks to any OpenAI-compatible chat-completions
   endpoint via ``httpx``. Configured from env (``OPENAI_API_KEY``,
-  ``OPENAI_BASE_URL``, ``REGEX_RUMBLE_MODEL``).
+  ``OPENAI_BASE_URL``, ``REGEX_RUMBLE_MODEL``). Also serves the
+  ``openai-compatible`` provider mode for local servers (LM Studio, vLLM,
+  Ollama's ``/v1`` shim) where the API key is optional.
+* :class:`OllamaProvider` — talks to a local Ollama daemon over its native
+  ``/api/chat`` endpoint. No key required.
 * :class:`CannedProvider` — deterministic, offline fallback. Used when no
-  API key is configured or the network call fails. Also the default in
+  provider is configured or the network call fails. Also the default in
   tests.
 * :class:`MockProvider` — tests inject a fixed list of attacks.
+
+Provider selection is controlled by ``REGEX_RUMBLE_PROVIDER``:
+
+* ``openai`` (default) — uses ``OPENAI_API_KEY`` against the OpenAI cloud
+  (or ``OPENAI_BASE_URL`` if set). Falls back to canned if no key.
+* ``ollama`` — local Ollama daemon (default base ``http://localhost:11434``).
+* ``openai-compatible`` — any OpenAI-shaped local server; honors
+  ``REGEX_RUMBLE_BASE_URL`` (e.g. ``http://localhost:1234/v1`` for LM
+  Studio, ``http://localhost:8000/v1`` for vLLM).
 
 The module never raises on a failed LLM call: it logs and degrades to the
 canned attack list so the dojo stays playable offline.
@@ -40,6 +53,8 @@ Label = Literal["should-match", "should-not-match"]
 MAX_ATTACKS = 5
 DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
+DEFAULT_OLLAMA_MODEL = "llama3.1"
 
 
 # ---- data shapes -----------------------------------------------------------
@@ -181,18 +196,21 @@ class OpenAIProvider:
 
     def __init__(
         self,
-        api_key: str,
+        api_key: str | None = None,
         *,
         base_url: str = DEFAULT_BASE_URL,
         model: str = DEFAULT_MODEL,
         timeout: float = 15.0,
         client: httpx.Client | None = None,
+        name: str | None = None,
     ) -> None:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._timeout = timeout
         self._client = client
+        if name is not None:
+            self.name = name
 
     def _build_user_prompt(
         self, pattern: str, allies: Sequence[str], enemies: Sequence[str]
@@ -216,7 +234,9 @@ class OpenAIProvider:
             "response_format": {"type": "json_object"},
             "temperature": 0.9,
         }
-        headers = {"Authorization": f"Bearer {self._api_key}"}
+        headers: dict[str, str] = {}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
         url = f"{self._base_url}/chat/completions"
 
         client = self._client or httpx.Client(timeout=self._timeout)
@@ -230,6 +250,132 @@ class OpenAIProvider:
 
         content = data["choices"][0]["message"]["content"]
         return _parse_attacks(content)
+
+    def ping(self) -> ProviderStatus:
+        """Best-effort liveness probe. Lists models if the endpoint supports it."""
+        url = f"{self._base_url}/models"
+        headers: dict[str, str] = {}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        client = self._client or httpx.Client(timeout=self._timeout)
+        try:
+            resp = client.get(url, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:  # noqa: BLE001
+            return ProviderStatus(self.name, self._base_url, self._model, False, [], str(exc))
+        finally:
+            if self._client is None:
+                client.close()
+        models: list[str] = []
+        if isinstance(data, dict):
+            items = data.get("data") or data.get("models") or []
+            if isinstance(items, list):
+                for item in items:
+                    if isinstance(item, dict):
+                        mid = item.get("id") or item.get("name")
+                        if isinstance(mid, str):
+                            models.append(mid)
+        return ProviderStatus(self.name, self._base_url, self._model, True, models, None)
+
+
+class OllamaProvider:
+    """Calls a local Ollama daemon over its native ``/api/chat`` endpoint."""
+
+    name = "ollama"
+
+    SYSTEM_PROMPT = OpenAIProvider.SYSTEM_PROMPT
+
+    def __init__(
+        self,
+        *,
+        base_url: str = DEFAULT_OLLAMA_BASE_URL,
+        model: str = DEFAULT_OLLAMA_MODEL,
+        timeout: float = 30.0,
+        client: httpx.Client | None = None,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._model = model
+        self._timeout = timeout
+        self._client = client
+
+    def _build_user_prompt(
+        self, pattern: str, allies: Sequence[str], enemies: Sequence[str]
+    ) -> str:
+        return OpenAIProvider._build_user_prompt(self, pattern, allies, enemies)
+
+    def attack(
+        self, pattern: str, allies: Sequence[str], enemies: Sequence[str]
+    ) -> list[Attack]:
+        payload = {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": self.SYSTEM_PROMPT},
+                {"role": "user", "content": self._build_user_prompt(pattern, allies, enemies)},
+            ],
+            "stream": False,
+            "format": "json",
+            "options": {"temperature": 0.9},
+        }
+        url = f"{self._base_url}/api/chat"
+        client = self._client or httpx.Client(timeout=self._timeout)
+        try:
+            resp = client.post(url, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+        finally:
+            if self._client is None:
+                client.close()
+        msg = data.get("message") if isinstance(data, dict) else None
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, str):
+            return []
+        return _parse_attacks(content)
+
+    def ping(self) -> ProviderStatus:
+        """List installed Ollama models via ``/api/tags``."""
+        url = f"{self._base_url}/api/tags"
+        client = self._client or httpx.Client(timeout=self._timeout)
+        try:
+            resp = client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:  # noqa: BLE001
+            return ProviderStatus(self.name, self._base_url, self._model, False, [], str(exc))
+        finally:
+            if self._client is None:
+                client.close()
+        models: list[str] = []
+        if isinstance(data, dict):
+            for item in data.get("models") or []:
+                if isinstance(item, dict) and isinstance(item.get("name"), str):
+                    models.append(item["name"])
+        return ProviderStatus(self.name, self._base_url, self._model, True, models, None)
+
+
+@dataclass(frozen=True)
+class ProviderStatus:
+    """Result of a provider liveness probe (``regex-rumble doctor``)."""
+
+    provider: str
+    base_url: str
+    model: str
+    ok: bool
+    models: list[str]
+    error: str | None
+
+    def render(self) -> str:
+        head = (
+            f"{'✓' if self.ok else '✗'} provider={self.provider} "
+            f"base_url={self.base_url} model={self.model}"
+        )
+        if not self.ok:
+            return f"{head}\n  error: {self.error}"
+        if not self.models:
+            return f"{head}\n  (endpoint up, no model list available)"
+        listed = ", ".join(self.models[:10])
+        more = "" if len(self.models) <= 10 else f" (+{len(self.models) - 10} more)"
+        return f"{head}\n  models: {listed}{more}"
 
 
 # ---- parsing / selection helpers ------------------------------------------
@@ -267,8 +413,37 @@ def _parse_attacks(blob: str) -> list[Attack]:
 
 
 def select_provider(*, env: dict[str, str] | None = None) -> AttackProvider:
-    """Pick an LLM provider based on env vars, falling back to canned."""
+    """Pick an LLM provider based on env vars, falling back to canned.
+
+    Env knobs:
+
+    * ``REGEX_RUMBLE_PROVIDER`` — ``openai`` (default), ``ollama``, or
+      ``openai-compatible``.
+    * ``REGEX_RUMBLE_BASE_URL`` — base URL for ``ollama`` /
+      ``openai-compatible`` (overrides defaults).
+    * ``REGEX_RUMBLE_MODEL`` — model name.
+    * ``OPENAI_API_KEY`` / ``OPENAI_BASE_URL`` — used by the ``openai``
+      provider for backwards compatibility.
+    """
     e = env if env is not None else os.environ
+    provider = (e.get("REGEX_RUMBLE_PROVIDER") or "openai").strip().lower()
+
+    if provider == "ollama":
+        return OllamaProvider(
+            base_url=e.get("REGEX_RUMBLE_BASE_URL", DEFAULT_OLLAMA_BASE_URL),
+            model=e.get("REGEX_RUMBLE_MODEL", DEFAULT_OLLAMA_MODEL),
+        )
+
+    if provider == "openai-compatible":
+        base_url = e.get("REGEX_RUMBLE_BASE_URL") or e.get("OPENAI_BASE_URL", DEFAULT_BASE_URL)
+        return OpenAIProvider(
+            api_key=e.get("OPENAI_API_KEY"),  # optional for local servers
+            base_url=base_url,
+            model=e.get("REGEX_RUMBLE_MODEL", DEFAULT_MODEL),
+            name="openai-compatible",
+        )
+
+    # provider == "openai" (or unknown → treat as openai for backwards compat)
     api_key = e.get("OPENAI_API_KEY")
     if not api_key:
         return CannedProvider()
@@ -276,6 +451,35 @@ def select_provider(*, env: dict[str, str] | None = None) -> AttackProvider:
         api_key=api_key,
         base_url=e.get("OPENAI_BASE_URL", DEFAULT_BASE_URL),
         model=e.get("REGEX_RUMBLE_MODEL", DEFAULT_MODEL),
+    )
+
+
+def diagnose(*, env: dict[str, str] | None = None) -> ProviderStatus:
+    """Ping the configured provider and return its status.
+
+    Used by the ``regex-rumble doctor`` subcommand. The canned provider has
+    nothing to ping, so it always reports OK with no model list.
+    """
+    provider = select_provider(env=env)
+    if isinstance(provider, CannedProvider):
+        return ProviderStatus(
+            provider="canned",
+            base_url="(offline)",
+            model="(none)",
+            ok=True,
+            models=[],
+            error=None,
+        )
+    ping = getattr(provider, "ping", None)
+    if callable(ping):
+        return ping()
+    return ProviderStatus(
+        provider=getattr(provider, "name", "unknown"),
+        base_url="(unknown)",
+        model="(unknown)",
+        ok=False,
+        models=[],
+        error="provider does not support ping",
     )
 
 

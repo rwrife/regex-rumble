@@ -80,6 +80,48 @@ regex-rumble --daily
 ```
 Loads a seeded challenge — same allies/enemies for everyone, every day.
 
+### Run offline with Ollama (or any local LLM)
+
+The sensei doesn't need a cloud API key. Point it at a local model and it'll
+forge adversarial examples on your own hardware — works on planes, airgapped
+boxes, and "my company won't let me ship prompts to OpenAI" laptops.
+
+**Ollama (3 lines):**
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull llama3.1
+REGEX_RUMBLE_PROVIDER=ollama regex-rumble
+```
+
+**Any OpenAI-compatible local server** (LM Studio, vLLM, llama.cpp's server,
+Ollama's `/v1` shim):
+
+```bash
+export REGEX_RUMBLE_PROVIDER=openai-compatible
+export REGEX_RUMBLE_BASE_URL=http://localhost:1234/v1   # LM Studio default
+export REGEX_RUMBLE_MODEL=your-local-model
+regex-rumble
+```
+
+**Env knobs:**
+
+| Var | Values | Default |
+| --- | --- | --- |
+| `REGEX_RUMBLE_PROVIDER` | `openai`, `ollama`, `openai-compatible` | `openai` |
+| `REGEX_RUMBLE_BASE_URL` | base URL for ollama / openai-compatible | provider default |
+| `REGEX_RUMBLE_MODEL` | model name | `gpt-4o-mini` (openai) / `llama3.1` (ollama) |
+| `OPENAI_API_KEY` | API key (only required for hosted `openai`) | unset |
+
+If the local endpoint is unreachable, the sensei prints a one-line toast and
+falls back to the canned offline attack list so the dojo stays playable.
+
+Check what's configured (and whether the endpoint is alive):
+
+```bash
+regex-rumble doctor
+```
+
 ### Know your weaknesses (heatmap analytics)
 
 Every sensei attack tags the example strings it throws with a feature vector

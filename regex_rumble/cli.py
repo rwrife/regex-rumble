@@ -250,5 +250,16 @@ def stats_cmd(
     typer.echo(render_heatmap(state, color=not no_color))
 
 
+@app.command("doctor")
+def doctor() -> None:
+    """Ping the configured sensei provider and print its status."""
+    from .sensei import diagnose
+
+    status = diagnose()
+    typer.echo(status.render())
+    if not status.ok:
+        raise typer.Exit(code=1)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()

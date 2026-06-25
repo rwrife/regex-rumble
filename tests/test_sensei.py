@@ -11,8 +11,11 @@ from regex_rumble.sensei import (
     Attack,
     CannedProvider,
     MockProvider,
+    OllamaProvider,
     OpenAIProvider,
+    ProviderStatus,
     _parse_attacks,
+    diagnose,
     run_attack,
     select_provider,
 )
@@ -216,3 +219,210 @@ def test_run_attack_with_failing_openai_provider_falls_back():
     report = run_attack(r"\d+", ["12"], ["ab"], provider=provider)
     assert report.used_fallback is True
     assert "openai" in report.provider
+
+
+# ---- provider selection (extended) ----------------------------------------
+
+
+def test_select_provider_ollama_mode():
+    provider = select_provider(
+        env={
+            "REGEX_RUMBLE_PROVIDER": "ollama",
+            "REGEX_RUMBLE_BASE_URL": "http://example.test:11434",
+            "REGEX_RUMBLE_MODEL": "llama3.2",
+        }
+    )
+    assert isinstance(provider, OllamaProvider)
+    assert provider.name == "ollama"
+
+
+def test_select_provider_openai_compatible_mode_no_key():
+    provider = select_provider(
+        env={
+            "REGEX_RUMBLE_PROVIDER": "openai-compatible",
+            "REGEX_RUMBLE_BASE_URL": "http://localhost:1234/v1",
+            "REGEX_RUMBLE_MODEL": "local-model",
+        }
+    )
+    assert isinstance(provider, OpenAIProvider)
+    assert provider.name == "openai-compatible"
+    assert provider._api_key is None
+    assert provider._base_url == "http://localhost:1234/v1"
+    assert provider._model == "local-model"
+
+
+def test_select_provider_unknown_falls_through_to_openai_default():
+    # Unknown provider name is treated as openai for forward-compat.
+    provider = select_provider(env={"REGEX_RUMBLE_PROVIDER": "made-up"})
+    assert isinstance(provider, CannedProvider)
+
+
+# ---- OllamaProvider wire format -------------------------------------------
+
+
+def test_ollama_provider_posts_to_native_chat_endpoint():
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content.decode())
+        # Ollama returns the assistant message under .message.content.
+        return httpx.Response(
+            200,
+            json={
+                "message": {
+                    "role": "assistant",
+                    "content": json.dumps(
+                        {"attacks": [{"text": "evil-local", "label": "should-not-match"}]}
+                    ),
+                }
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport)
+    provider = OllamaProvider(
+        base_url="http://example.test:11434",
+        model="llama3.1",
+        client=client,
+    )
+    attacks = provider.attack(r"\d+", ["1"], ["a"])
+
+    assert captured["url"].endswith("/api/chat")
+    assert captured["body"]["model"] == "llama3.1"
+    assert captured["body"]["stream"] is False
+    assert captured["body"]["format"] == "json"
+    assert len(captured["body"]["messages"]) == 2
+    assert attacks == [Attack("evil-local", "should-not-match")]
+
+
+def test_ollama_provider_http_error_propagates_for_run_attack_fallback():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="boom")
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport)
+    provider = OllamaProvider(client=client)
+    with pytest.raises(httpx.HTTPStatusError):
+        provider.attack(r"\d+", [], [])
+
+
+def test_run_attack_with_failing_ollama_provider_falls_back():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("nope")
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport)
+    provider = OllamaProvider(client=client)
+    report = run_attack(r"\d+", ["12"], ["ab"], provider=provider)
+    assert report.used_fallback is True
+    assert "ollama" in report.provider
+    assert "canned" in report.provider
+
+
+# ---- doctor / diagnose ----------------------------------------------------
+
+
+def test_diagnose_canned_when_no_key():
+    status = diagnose(env={})
+    assert status.ok is True
+    assert status.provider == "canned"
+    assert "canned" in status.render()
+
+
+def test_diagnose_ollama_lists_models(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url).endswith("/api/tags")
+        return httpx.Response(
+            200,
+            json={"models": [{"name": "llama3.1"}, {"name": "mistral"}]},
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport)
+    provider = OllamaProvider(base_url="http://example.test:11434", client=client)
+    status = provider.ping()
+    assert status.ok is True
+    assert status.models == ["llama3.1", "mistral"]
+    rendered = status.render()
+    assert "llama3.1" in rendered and "mistral" in rendered
+
+
+def test_diagnose_ollama_connection_error_reports_failure():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused")
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport)
+    provider = OllamaProvider(client=client)
+    status = provider.ping()
+    assert status.ok is False
+    assert status.error is not None and "refused" in status.error
+    assert "✗" in status.render()
+
+
+def test_diagnose_openai_compatible_models_endpoint():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url).endswith("/models")
+        return httpx.Response(
+            200,
+            json={"data": [{"id": "local-7b"}, {"id": "local-13b"}]},
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport)
+    provider = OpenAIProvider(
+        api_key=None,
+        base_url="http://localhost:1234/v1",
+        model="local-7b",
+        client=client,
+        name="openai-compatible",
+    )
+    status = provider.ping()
+    assert status.ok is True
+    assert status.models == ["local-7b", "local-13b"]
+    assert status.provider == "openai-compatible"
+
+
+def test_provider_status_render_truncates_long_model_list():
+    status = ProviderStatus(
+        provider="ollama",
+        base_url="http://x",
+        model="m",
+        ok=True,
+        models=[f"m{i}" for i in range(15)],
+        error=None,
+    )
+    rendered = status.render()
+    assert "+5 more" in rendered
+
+
+def test_openai_provider_omits_auth_header_when_no_key():
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["headers"] = dict(request.headers)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps({"attacks": []})
+                        }
+                    }
+                ]
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport)
+    provider = OpenAIProvider(
+        api_key=None,
+        base_url="http://localhost:1234/v1",
+        model="local-7b",
+        client=client,
+        name="openai-compatible",
+    )
+    provider.attack(r"\d+", [], [])
+    assert "authorization" not in captured["headers"]
